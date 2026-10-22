@@ -1,0 +1,16 @@
+#!/bin/sh
+
+python -c "
+from pathlib import Path
+p = Path('VERSION')
+v = p.read_text(encoding='utf-8').strip().split('.')
+v[-1] = str(int(v[-1]) + 1)
+p.write_text('.'.join(v) + '\n', encoding='utf-8')
+"
+
+if [ $? -ne 0 ]; then
+    echo "Error: Could not increment VERSION; commit aborted."
+    exit 1
+fi
+
+git add VERSION

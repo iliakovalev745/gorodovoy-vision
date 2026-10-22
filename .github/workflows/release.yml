@@ -1,0 +1,122 @@
+
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            artifact: GorodovoyVision-linux-x86_64
+          - os: windows-latest
+            artifact: GorodovoyVision-windows-x86_64.exe
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install CPU PyTorch
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+
+      - name: Install project and build dependencies
+        run: |
+          python -m pip install -r requirements.txt
+          python -m pip install pyinstaller
+
+      - name: Download YOLO model
+        run: |
+          python -c "from ultralytics import YOLO; YOLO('yolo26n.pt')"
+          python -c "from pathlib import Path; Path('models').mkdir(exist_ok=True); Path('models/yolo26n.pt').write_bytes(Path('yolo26n.pt').read_bytes())"
+
+      - name: Build Linux executable
+        if: runner.os == 'Linux'
+        run: |
+          pyinstaller --noconfirm --clean --onefile --console \
+            --name GorodovoyVision \
+            --collect-all ultralytics \
+            --collect-all torch \
+            --collect-all torchvision \
+            --collect-all cv2 \
+            --collect-all fastapi \
+            --collect-all uvicorn \
+            --collect-all numpy \
+            --add-data "classes.txt:." \
+            --add-data "models/yolo26n.pt:models" \
+            app/__main__.py
+
+      - name: Build Windows executable
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          pyinstaller --noconfirm --clean --onefile --console `
+            --name GorodovoyVision `
+            --collect-all ultralytics `
+            --collect-all torch `
+            --collect-all torchvision `
+            --collect-all cv2 `
+            --collect-all fastapi `
+            --collect-all uvicorn `
+            --collect-all numpy `
+            --add-data "classes.txt;." `
+            --add-data "models/yolo26n.pt;models" `
+            app/__main__.py
+
+      - name: Rename Linux executable
+        if: runner.os == 'Linux'
+        run: cp dist/GorodovoyVision dist/GorodovoyVision-linux-x86_64
+
+      - name: Rename Windows executable
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: Copy-Item dist/GorodovoyVision.exe dist/GorodovoyVision-windows-x86_64.exe
+
+      - name: Upload executable
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-${{ matrix.os }}
+          path: dist/GorodovoyVision-*
+          if-no-files-found: error
+
+  publish:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-files
+          pattern: build-*
+          merge-multiple: true
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          chmod +x release-files/GorodovoyVision-linux-x86_64
+          gh release create "${GITHUB_REF_NAME}" \
+            release-files/GorodovoyVision-linux-x86_64 \
+            release-files/GorodovoyVision-windows-x86_64.exe \
+            --title "Gorodovoy Vision ${GITHUB_REF_NAME}" \
+            --generate-notes

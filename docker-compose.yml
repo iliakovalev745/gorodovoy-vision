@@ -1,0 +1,10 @@
+services:
+  vision:
+    build: .
+    env_file: .env
+    ports:
+      - "${APP_PORT:-8000}:8000"
+    restart: unless-stopped
+    volumes:
+      - ./logs:/opt/gorodovoy-vision/logs
+      - ./classes.txt:/opt/gorodovoy-vision/classes.txt:ro

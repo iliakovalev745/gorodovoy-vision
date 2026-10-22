@@ -1,0 +1,17 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+.env.*
+!.env.example
+*.pt
+build/
+dist/
+*.spec
+.idea/
+.vscode/
+*.log
+*.mp4
+*.avi
+*.mov
