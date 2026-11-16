@@ -57,7 +57,7 @@ jobs:
       - name: Build Linux executable
         if: runner.os == 'Linux'
         run: |
-          pyinstaller --noconfirm --clean --onefile --console \
+          pyinstaller --noconfirm --clean --console \
             --name GorodovoyVision \
             --hidden-import="uvicorn.logging" \
             --hidden-import="uvicorn.loops" \
@@ -74,6 +74,12 @@ jobs:
             --add-data "classes.txt:." \
             --add-data "models/yolo26n.pt:models" \
             app/__main__.py
+
+      - name: Archive Linux build
+        if: runner.os == 'Linux'
+        run: |
+          cd dist/GorodovoyVision
+          zip -r ../GorodovoyVision-linux-x86_64.zip .
 
       - name: Build Windows executable
         if: runner.os == 'Windows'
@@ -97,10 +103,6 @@ jobs:
             --add-data "models/yolo26n.pt;models" `
             app/__main__.py
 
-      - name: Rename Linux executable
-        if: runner.os == 'Linux'
-        run: cp dist/GorodovoyVision dist/GorodovoyVision-linux-x86_64
-
       - name: Rename Windows executable
         if: runner.os == 'Windows'
         shell: pwsh
@@ -110,7 +112,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: build-${{ matrix.os }}
-          path: dist/GorodovoyVision-*
+          path: |
+            dist/GorodovoyVision-linux-x86_64.zip
+            dist/GorodovoyVision-windows-x86_64.exe
           if-no-files-found: error
 
   publish:
@@ -133,9 +137,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          chmod +x release-files/GorodovoyVision-linux-x86_64
           gh release create "${GITHUB_REF_NAME}" \
-            release-files/GorodovoyVision-linux-x86_64 \
+            release-files/GorodovoyVision-linux-x86_64.zip \
             release-files/GorodovoyVision-windows-x86_64.exe \
             --title "Gorodovoy Vision ${GITHUB_REF_NAME}" \
             --generate-notes
