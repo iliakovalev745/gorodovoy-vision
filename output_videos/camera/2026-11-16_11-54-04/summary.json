@@ -1,0 +1,8 @@
+{
+    "frames_processed": 4649,
+    "average_inference_ms": 44.8,
+    "average_processing_ms": 44.81,
+    "total_detections": 3499,
+    "video": "D:\\gorodovoy_vision\\output_videos\\camera\\2026-11-16_11-54-04\\detection.mp4",
+    "metrics": "D:\\gorodovoy_vision\\output_videos\\camera\\2026-11-16_11-54-04\\metrics.csv"
+}
