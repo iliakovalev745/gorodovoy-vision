@@ -1,6 +1,8 @@
-from pathlib import Path
-import logging
 
+import logging
+from pathlib import Path
+
+import torch
 from ultralytics import YOLO
 
 import config
@@ -12,81 +14,124 @@ log = logging.getLogger(__name__)
 def wanted_classes():
     if config.OBJECT_CLASSES:
         return set(config.OBJECT_CLASSES)
-    p = Path(config.CLASSES_FILE)
-    if p.exists():
+
+    path = Path(config.CLASSES_FILE)
+
+    if path.exists():
         return {
-            s.strip().lower()
-            for s in p.read_text(encoding="utf-8").splitlines()
-            if s.strip() and not s.lstrip().startswith("#")
+            line.strip().lower()
+            for line in path.read_text(encoding="utf-8").splitlines()
+            if line.strip() and not line.lstrip().startswith("#")
         }
+
     return set()
 
 
 class Detector:
-
     def __init__(self):
-        log.info("Loading object model %s", config.MODEL_PATH)
+        log.info("Loading model: %s", config.MODEL_PATH)
+
         self.model = YOLO(config.MODEL_PATH)
+
+        if config.DEVICE.lower() == "auto":
+            self.device = "0" if torch.cuda.is_available() else "cpu"
+        else:
+            self.device = config.DEVICE
+
+        if self.device != "cpu" and torch.cuda.is_available():
+            torch.backends.cudnn.benchmark = True
+
+        log.info("Device: %s", self.device)
+        log.info("Image size: %s", config.IMGSZ)
+
         wanted = wanted_classes()
         self.ids = None
+
         if wanted:
             self.ids = [
-                int(i)
-                for i, n in self.model.names.items()
-                if str(n).lower() in wanted
+                int(class_id)
+                for class_id, name in self.model.names.items()
+                if str(name).lower() in wanted
             ]
-            missing = wanted - {
-                str(self.model.names[i]).lower() for i in self.ids
+
+            found = {
+                str(self.model.names[class_id]).lower()
+                for class_id in self.ids
             }
+
+            missing = wanted - found
+
             if missing:
                 log.warning(
-                    "Classes not supported by model: %s",
-                    ", ".join(sorted(missing)),
+                    "Unsupported classes: %s",
+                    ", ".join(sorted(missing))
                 )
+
             if not self.ids:
-                log.warning("No matching class found; filter disabled")
+                log.warning("Class filter disabled")
 
     def predict(self, frame):
-        h, w = frame.shape[:2]
-        kw = {
+        height, width = frame.shape[:2]
+
+        kwargs = {
             "imgsz": config.IMGSZ,
             "conf": config.CONF,
             "verbose": False,
+            "max_det": config.MAX_DETECTIONS,
+            "device": self.device
         }
-        if self.ids:
-            kw["classes"] = self.ids
-        if config.DEVICE.lower() not in {"", "auto"}:
-            kw["device"] = config.DEVICE
 
-        r = self.model.predict(frame, **kw)[0]
-        out = []
-        if r.boxes is not None:
-            for b in r.boxes:
-                i = int(b.cls[0].item())
-                label = str(r.names.get(i, i))
-                x1, y1, x2, y2 = map(float, b.xyxy[0].tolist())
-                box = {
-                    k: round(v, 2)
-                    for k, v in zip(("x1", "y1", "x2", "y2"), (x1, y1, x2, y2))
-                }
-                out.append(
-                    {
-                        "label": label,
-                        "confidence": round(float(b.conf[0].item()), 5),
-                        "bbox": box,
-                        "center": {
-                            "x": round((x1 + x2) / 2, 2),
-                            "y": round((y1 + y2) / 2, 2),
-                        },
-                        "relative": {
-                            "center_x": round((x1 + x2) / 2 / w, 6),
-                            "center_y": round((y1 + y2) / 2 / h, 6),
-                            "width": round((x2 - x1) / w, 6),
-                            "height": round((y2 - y1) / h, 6),
-                        },
-                        "relative_position": relative_position(
-                            label, box, w, h
-                        ),
-                    }
+        if self.ids:
+            kwargs["classes"] = self.ids
+
+        with torch.inference_mode():
+            result = self.model.predict(frame, **kwargs)[0]
+
+        objects = []
+
+        if result.boxes is None:
+            return objects
+
+        for box in result.boxes:
+            class_id = int(box.cls[0].item())
+            label = str(result.names.get(class_id, class_id))
+
+            x1, y1, x2, y2 = map(
+                float,
+                box.xyxy[0].tolist()
+            )
+
+            bbox = {
+                key: round(value, 2)
+                for key, value in zip(
+                    ("x1", "y1", "x2", "y2"),
+                    (x1, y1, x2, y2)
                 )
-        return out
+            }
+
+            center_x = (x1 + x2) / 2
+            center_y = (y1 + y2) / 2
+
+            objects.append({
+                "label": label,
+                "confidence": round(float(box.conf[0].item()), 5),
+                "bbox": bbox,
+                "center": {
+                    "x": round(center_x, 2),
+                    "y": round(center_y, 2)
+                },
+                "relative": {
+                    "center_x": round(center_x / width, 6),
+                    "center_y": round(center_y / height, 6),
+                    "width": round((x2 - x1) / width, 6),
+                    "height": round((y2 - y1) / height, 6)
+                },
+                "relative_position": relative_position(
+                    label,
+                    bbox,
+                    width,
+                    height
+                )
+            })
+
+        return objects
